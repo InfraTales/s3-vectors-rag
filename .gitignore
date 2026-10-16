@@ -1,0 +1,9 @@
+node_modules/
+cdk.out/
+build/
+coverage/
+*.js
+!jest.config.js
+*.d.ts
+.env
+.DS_Store
