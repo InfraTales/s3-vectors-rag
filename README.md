@@ -4,6 +4,10 @@ Retrieval-augmented generation (RAG) with Amazon S3 Vectors as the vector store 
 
 Everything is AWS Cloud Development Kit (CDK) v2 in TypeScript, tested without an AWS account.
 
+## Architecture
+
+![Upload triggers ingest Lambda, Titan embeds, S3 Vectors stores; query Lambda asks Nova Micro](docs/architecture.png)
+
 ## How it works
 
 ```text
