@@ -39,7 +39,7 @@ Each query pays for the whole index it searches, not for the results it returns.
 
 For one index of 10 million chunks at 4,236 processed bytes each:
 
-- First 100,000 vectors: 100,000 x 4,236 bytes = 0.394 GB, at $0.000003906 per GB = $0.0000015
+- First 100,000 vectors: 100,000 x 4,236 bytes = 0.395 GB, at $0.000003906 per GB = $0.0000015
 - Next 9.9 million: 39.06 GB at $0.000001953 per GB = $0.0000763
 - Total: about $0.0000778 per query, or $77.82 for 1 million queries
 
