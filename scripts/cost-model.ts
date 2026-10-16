@@ -9,6 +9,8 @@
  *   npm run cost -- --vectors 2000000 --queries 300000 --indexes 20
  */
 
+import { S3_VECTORS_LIMITS } from '../app/src/limits';
+
 export const PRICES = {
   s3v: {
     storagePerGbMonth: 0.06, // Vectors-TimedStorage-ByteHrs
@@ -56,6 +58,8 @@ export interface Scenario {
   topK: number;
   /** How often the whole corpus is re-embedded and re-written per month (1/6 = every six months). */
   rewritesPerMonth: number;
+  /** Chunks per document. Ingest writes each document in its own PutVectors call. Default: full 500-vector calls. */
+  chunksPerDocument?: number;
   tokensPerChunk: number;
   tokensPerQuestion: number;
   /** Prompt tokens per answer: system prompt + topK chunks + question. */
@@ -97,13 +101,19 @@ export function processingPerQuery(n: number, bytesPerVector: number): number {
   return cost;
 }
 
-/** PUT cost for writing `count` vectors in batches of `batch`. Each call bills at least 128 KB. */
-export function putCost(count: number, bytesPerVector: number, batch = 500): number {
-  const full = Math.floor(count / batch);
-  const rest = count % batch;
+/**
+ * PUT cost for writing `count` vectors. Ingest makes one PutVectors call per document
+ * (more only past 500 chunks), and each call bills at least 128 KB. So a short document
+ * pays for 128 KB however few chunks it has.
+ */
+export function putCost(count: number, bytesPerVector: number, chunksPerDocument = 500): number {
+  if (chunksPerDocument < 1) throw new Error('chunksPerDocument must be at least 1');
+  const batch = S3_VECTORS_LIMITS.maxVectorsPerWrite;
   const callBytes = (n: number) => Math.max(n * bytesPerVector, PRICES.s3v.putMinBytes);
-  const bytes = full * callBytes(batch) + (rest > 0 ? callBytes(rest) : 0);
-  return (bytes / GB) * PRICES.s3v.putPerGb;
+  const full = Math.floor(chunksPerDocument / batch);
+  const rest = chunksPerDocument % batch;
+  const perDocument = full * callBytes(batch) + (rest > 0 ? callBytes(rest) : 0);
+  return ((count / chunksPerDocument) * perDocument / GB) * PRICES.s3v.putPerGb;
 }
 
 export function estimate(s: Scenario): Breakdown {
@@ -115,7 +125,7 @@ export function estimate(s: Scenario): Breakdown {
   const perIndex = s.vectors / s.indexes;
   const returnedPerQuery = s.topK * Math.max(s.keyBytes + s.filterableBytes + s.nonFilterableBytes, p.returnedMinBytesPerResult);
   const billableReturned = Math.max(0, returnedPerQuery - p.returnedFreeBytesPerQuery);
-  const putOnce = putCost(s.vectors, size);
+  const putOnce = putCost(s.vectors, size, s.chunksPerDocument);
   const embedOnce = ((s.vectors * s.tokensPerChunk) / 1000) * PRICES.bedrock.titanV2Per1kTokens;
 
   const b = {
@@ -158,6 +168,7 @@ export const THIS_REPO: Omit<Scenario, 'vectors' | 'queriesPerMonth'> = {
   nonFilterableBytes: 1300, // chunk text (up to 1,200 characters) + heading
   topK: 5,
   rewritesPerMonth: 0,
+  chunksPerDocument: 10, // an assumption: about 12 KB of Markdown per document
   tokensPerChunk: 300,
   tokensPerQuestion: 20,
   promptTokens: 1700, // system prompt + 5 chunks + question

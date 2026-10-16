@@ -4,7 +4,7 @@
  * handler. AWS calls hit in-memory fakes (S3, Bedrock, an S3 vector index).
  */
 import { ConverseCommand, InvokeModelCommand, BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
-import { GetObjectCommand, NoSuchKey, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, NoSuchKey, NotFound, S3Client } from '@aws-sdk/client-s3';
 import { mockClient } from 'aws-sdk-client-mock';
 import { NON_FILTERABLE_KEYS } from '../../app/src/vector-store';
 import { installFakeBedrock } from '../support/fake-bedrock';
@@ -26,12 +26,23 @@ index.install();
 const bedrock = installFakeBedrock();
 const files = new Map<string, { body: string; modified: Date }>();
 const s3 = mockClient(S3Client);
-s3.on(GetObjectCommand).callsFake((input: GetObjectCommand['input']) => {
+// A fake ETag: changes whenever the body or the time changes.
+const etagOf = (f: { body: string; modified: Date }) => `"${Buffer.from(f.body + f.modified.toISOString()).toString('base64').slice(-16)}"`;
+/** Set to make the next GetObject return an older version, as a slow invocation would. */
+let staleRead: { body: string; modified: Date } | undefined;
+s3.on(HeadObjectCommand).callsFake((input: HeadObjectCommand['input']) => {
   const file = files.get(input.Key ?? '');
+  if (file === undefined) throw new NotFound({ message: 'gone', $metadata: {} });
+  return { ETag: etagOf(file), LastModified: file.modified };
+});
+s3.on(GetObjectCommand).callsFake((input: GetObjectCommand['input']) => {
+  const stale = staleRead;
+  staleRead = undefined;
+  const file = stale ?? files.get(input.Key ?? '');
   // S3 returns 404 NoSuchKey here only because the ingest role has s3:ListBucket (a template test checks it).
   if (file === undefined) throw new NoSuchKey({ message: 'gone', $metadata: {} });
   // The handler only calls transformToString on the body stream.
-  return { Body: { transformToString: async () => file.body } as never, ContentLength: Buffer.byteLength(file.body), LastModified: file.modified };
+  return { Body: { transformToString: async () => file.body } as never, ContentLength: Buffer.byteLength(file.body), LastModified: file.modified, ETag: etagOf(file) };
 });
 
 // Import after the environment and mocks are in place: the handlers build clients at load time.
@@ -163,4 +174,15 @@ test('a failed AWS call becomes a 500 without leaking the error text', async () 
   m.restore();
   installFakeBedrock();
   expect(res).toEqual({ status: 500, body: { error: 'internal error' } });
+});
+
+test('a re-upload that finishes before an older one still wins', async () => {
+  // Two uploads of one key run at once. The newer one is already indexed; the older
+  // invocation read version 1 before version 2 landed and writes last.
+  const key = 'docs/acme/faq/hours.md';
+  await upload(key, '# Hours\n\nThe help desk opens at 10am on weekdays.', '2026-10-07T00:00:00Z');
+  staleRead = { body: '# Hours\n\nThe help desk opens at 8am on weekdays.', modified: new Date('2026-10-06T00:00:00Z') };
+  await ingest.handler(event('ObjectCreated:Put', key));
+  expect(staleRead).toBeUndefined();
+  expect(String(index.vectors.get('acme/faq/hours#00000')?.metadata.text)).toContain('10am');
 });
