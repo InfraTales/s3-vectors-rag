@@ -24,13 +24,14 @@ Object.assign(process.env, {
 const index = new MemoryIndex({ indexArn: INDEX_ARN, dimension: 1024, metric: 'cosine', nonFilterableKeys: [...NON_FILTERABLE_KEYS] });
 index.install();
 const bedrock = installFakeBedrock();
-const files = new Map<string, string>();
+const files = new Map<string, { body: string; modified: Date }>();
 const s3 = mockClient(S3Client);
 s3.on(GetObjectCommand).callsFake((input: GetObjectCommand['input']) => {
-  const body = files.get(input.Key ?? '');
-  if (body === undefined) throw new NoSuchKey({ message: 'gone', $metadata: {} });
+  const file = files.get(input.Key ?? '');
+  // S3 returns 404 NoSuchKey here only because the ingest role has s3:ListBucket (a template test checks it).
+  if (file === undefined) throw new NoSuchKey({ message: 'gone', $metadata: {} });
   // The handler only calls transformToString on the body stream.
-  return { Body: { transformToString: async () => body } as never };
+  return { Body: { transformToString: async () => file.body } as never, ContentLength: Buffer.byteLength(file.body), LastModified: file.modified };
 });
 
 // Import after the environment and mocks are in place: the handlers build clients at load time.
@@ -40,8 +41,8 @@ const query = require('../../app/src/query-handler') as typeof import('../../app
 const event = (eventName: string, key: string, size = 100, eventTime = '2026-10-01T00:00:00Z') => ({
   Records: [{ eventName, eventTime, s3: { bucket: { name: 'docs' }, object: { key, size } } }],
 });
-const upload = async (key: string, body: string, eventTime?: string) => {
-  files.set(key, body);
+const upload = async (key: string, body: string, eventTime = '2026-10-01T00:00:00Z') => {
+  files.set(key, { body, modified: new Date(eventTime) });
   await ingest.handler(event('ObjectCreated:Put', key, Buffer.byteLength(body), eventTime));
 };
 const ask = async (body: unknown) => {
@@ -122,9 +123,26 @@ test('deleting the S3 object deletes its vectors', async () => {
 test('objects outside the layout, oversized files and already-deleted files are skipped', async () => {
   const before = index.vectors.size;
   await ingest.handler(event('ObjectCreated:Put', 'docs/acme/notes.md'));
-  await ingest.handler(event('ObjectCreated:Put', 'docs/acme/faq/huge.md', 600 * 1024));
+  files.set('docs/acme/faq/huge.md', { body: 'x '.repeat(300 * 1024), modified: new Date() });
+  await ingest.handler(event('ObjectCreated:Put', 'docs/acme/faq/huge.md', 10)); // the size in the event is ignored
   await ingest.handler(event('ObjectCreated:Put', 'docs/acme/faq/vanished.md'));
   expect(index.vectors.size).toBe(before);
+  expect(bedrock.embedCalls).toHaveLength(0);
+});
+
+test('events that arrive out of order still leave the index matching the bucket', async () => {
+  // A delete, then a re-upload; S3 delivers the re-upload's event first and the delete's last.
+  await upload('docs/acme/faq/returns.md', '# Returns\n\nReturn labels are free for members.', '2026-10-05T00:00:00Z');
+  await ingest.handler(event('ObjectRemoved:Delete', 'docs/acme/faq/returns.md'));
+  expect(index.vectors.has('acme/faq/returns#00000')).toBe(true);
+  // An upload event for an object that's gone by the time we run removes the vectors.
+  files.delete('docs/acme/faq/returns.md');
+  await ingest.handler(event('ObjectCreated:Put', 'docs/acme/faq/returns.md'));
+  expect(index.vectors.has('acme/faq/returns#00000')).toBe(false);
+});
+
+test('the updated time comes from the object, not the event', () => {
+  expect(index.vectors.get('acme/policies/refunds#00000')?.metadata.updated).toBe(Date.parse('2026-10-02T00:00:00Z') / 1000);
 });
 
 test('the query URL rejects bad requests with 4xx and no AWS calls', async () => {

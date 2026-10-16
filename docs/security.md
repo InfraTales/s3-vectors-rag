@@ -18,10 +18,10 @@ Each function has its own role with no AWS managed policies:
 
 | Function | Allowed |
 |---|---|
-| Ingest | `s3:GetObject` on `docs/*` in the documents bucket; `s3vectors:PutVectors`, `GetVectors`, `DeleteVectors` on the one index ARN; `bedrock:InvokeModel` on the Titan V2 model ARN; send to its dead-letter queue; write its own log group |
+| Ingest | `s3:GetObject` on `docs/*` and `s3:ListBucket` on the documents bucket; `s3vectors:PutVectors`, `GetVectors`, `DeleteVectors` on the one index ARN; `bedrock:InvokeModel` on the Titan V2 model ARN; send to its dead-letter queue; write its own log group |
 | Query | `s3vectors:QueryVectors` and `GetVectors` on the index ARN; `bedrock:InvokeModel` on Titan V2 and the answer model; write its own log group |
 
-`s3vectors:GetVectors` is on the query role because a query with a filter or `returnMetadata` needs it; without it the request fails with 403. The template tests check both lists. cdk-nag (AWS Solutions) runs on every synth, and each acknowledged finding has a written reason in `infra/lib/nag.ts`.
+`s3:ListBucket` is there so that S3 answers 404 for a deleted document; without it, S3 answers 403, and the function can't tell a delete from a permissions problem. `s3vectors:GetVectors` is on the query role because a query with a filter or `returnMetadata` needs it; without it the request fails with 403. The template tests check both lists. cdk-nag (AWS Solutions) runs on every synth, and each acknowledged finding has a written reason in `infra/lib/nag.ts`.
 
 ## The query endpoint
 

@@ -83,6 +83,7 @@ test('ingest can write and delete vectors and read docs/, nothing more', () => {
     'logs:CreateLogStream',
     'logs:PutLogEvents',
     's3:GetObject',
+    's3:ListBucket',
     's3vectors:DeleteVectors',
     's3vectors:GetVectors',
     's3vectors:PutVectors',
@@ -95,6 +96,9 @@ test('ingest can write and delete vectors and read docs/, nothing more', () => {
   expect(vectors.Resource).toEqual({ 'Fn::GetAtt': [indexLogicalId, 'IndexArn'] });
   const s3 = policyOf(ingest).find((s: any) => s.Action === 's3:GetObject');
   expect(JSON.stringify(s3.Resource)).toContain('/docs/*');
+  // Without ListBucket, GetObject on a deleted key is 403, and the handler would treat a delete as a failure.
+  const list = policyOf(ingest).find((s: any) => s.Action === 's3:ListBucket');
+  expect(list.Resource).toEqual({ 'Fn::GetAtt': [expect.stringMatching(/^Docs/), 'Arn'] });
   expect(ingest.Properties.ReservedConcurrentExecutions).toBe(2);
 });
 
