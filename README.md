@@ -17,7 +17,7 @@ POST {tenant, question}  ->  Query Lambda (function URL, IAM auth)              
                              drop far matches -> Bedrock Converse (Amazon Nova Micro) -> answer + sources
 ```
 
-- **Ingest.** The function splits each document into chunks of up to 1,200 characters, keeping paragraphs whole when they fit and repeating the last sentence or two of each chunk at the start of the next. Amazon Titan Text Embeddings V2 turns each chunk into a normalized 1,024-dimension vector, and the function writes them with `PutVectors` in batches of 500. A re-upload overwrites chunks in place and deletes the ones a shorter version no longer has. Deleting the file deletes its vectors.
+- **Ingest.** The function splits each document into chunks of up to 1,200 characters, keeping paragraphs whole when they fit and repeating the last sentence or two of each chunk at the start of the next. Amazon Titan Text Embeddings V2 turns each chunk into a normalized 1,024-dimension vector, and the function writes them with `PutVectors` in batches of 500. A re-upload overwrites chunks in place and deletes the ones a shorter version no longer has. Deleting the file deletes its vectors. S3 doesn't deliver events in order, so the function ignores the event type and checks the object itself: if it exists, it gets indexed, and if it's gone, its vectors go too.
 - **Query.** The function embeds the question, searches the index with a metadata filter that includes the caller's tenant on every query, and drops matches with a cosine distance above 0.6. If nothing is left, it answers "not found" without calling the model. Otherwise it sends the chunks to Nova Micro through the Converse API and returns the answer with its sources.
 - **Metadata.** `tenant`, `category`, `doc` and `updated` are filterable. The chunk `text` and its heading (`title`) are non-filterable: a chunk is far bigger than the 2 KB filterable allowance, and non-filterable metadata isn't counted in query processing charges.
 
@@ -40,7 +40,7 @@ You need Node.js 24 and npm. This part needs no AWS account:
 
 ```bash
 npm ci
-npm run check   # type check, lint, bundle, 143 tests, synth with cdk-nag
+npm run check   # type check, lint, bundle, 145 tests, synth with cdk-nag
 npm run cost    # the cost table above
 ```
 

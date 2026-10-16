@@ -25,6 +25,11 @@ const store = new S3VectorsStore(new S3VectorsClient({}), cfg.indexArn);
 const embedder = new TitanEmbedder(new BedrockRuntimeClient({ maxAttempts: 6 }), cfg.embeddingModelId, cfg.dimensions);
 const concurrency = intEnv('EMBED_CONCURRENCY', 4);
 
+/**
+ * S3 doesn't promise event order, so we never trust the event type. For each record we
+ * look at the object as it is now: if it exists we (re)index it, if it's gone we delete
+ * its vectors. A late ObjectRemoved after a re-upload then re-indexes instead of wiping.
+ */
 export async function handler(event: S3EventLike): Promise<void> {
   for (const record of event.Records) {
     const key = record.s3.object.key;
@@ -33,27 +38,25 @@ export async function handler(event: S3EventLike): Promise<void> {
       log('warn', 'skipped object outside docs/<tenant>/<category>/<doc>.(md|txt)', { key });
       continue;
     }
-    if (record.eventName.startsWith('ObjectRemoved')) {
-      const deleted = await removeDocument(ref, store);
-      log('info', 'document removed', { ...ref, deleted });
-      continue;
-    }
-    if ((record.s3.object.size ?? 0) > MAX_DOC_BYTES) {
-      log('warn', 'skipped document over the size cap', { ...ref, bytes: record.s3.object.size, cap: MAX_DOC_BYTES });
-      continue;
-    }
-    let text: string;
+    let obj;
     try {
-      const obj = await s3.send(new GetObjectCommand({ Bucket: record.s3.bucket.name, Key: decodeKey(key) }));
-      text = (await obj.Body?.transformToString('utf-8')) ?? '';
+      // Needs s3:ListBucket too: without it, S3 answers 403 for a missing key instead of 404.
+      obj = await s3.send(new GetObjectCommand({ Bucket: record.s3.bucket.name, Key: decodeKey(key) }));
     } catch (err) {
-      // Deleted again before we got to it. The ObjectRemoved event cleans up.
-      if (err instanceof NoSuchKey) continue;
-      throw err;
+      if (!(err instanceof NoSuchKey)) throw err;
+      const deleted = await removeDocument(ref, store);
+      log('info', 'document removed', { ...ref, event: record.eventName, deleted });
+      continue;
     }
-    const updated = Math.floor(Date.parse(record.eventTime) / 1000);
+    if ((obj.ContentLength ?? 0) > MAX_DOC_BYTES) {
+      (obj.Body as { destroy?: () => void } | undefined)?.destroy?.(); // don't download it
+      log('warn', 'skipped document over the size cap', { ...ref, bytes: obj.ContentLength, cap: MAX_DOC_BYTES });
+      continue;
+    }
+    const text = (await obj.Body?.transformToString('utf-8')) ?? '';
+    const updated = Math.floor((obj.LastModified ?? new Date(record.eventTime)).getTime() / 1000);
     const result = await ingestDocument(ref, text, updated, { store, embedder, concurrency });
-    log('info', 'document ingested', { ...ref, ...result });
+    log('info', 'document ingested', { ...ref, event: record.eventName, ...result });
   }
 }
 

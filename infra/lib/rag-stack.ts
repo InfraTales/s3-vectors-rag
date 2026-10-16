@@ -94,8 +94,11 @@ export class RagStack extends cdk.Stack {
       }),
     );
     this.ingestFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['bedrock:InvokeModel'], resources: [embedModelArn] }));
-    // Read objects under docs/ only. No list, no bucket-level actions.
+    // Read objects under docs/ only.
     this.ingestFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:GetObject'], resources: [this.docsBucket.arnForObjects('docs/*')] }));
+    // ListBucket makes S3 answer 404 (NoSuchKey) for a deleted document instead of 403. The handler
+    // relies on that to tell "deleted" from "not allowed". It lists key names only.
+    this.ingestFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['s3:ListBucket'], resources: [this.docsBucket.bucketArn] }));
 
     for (const suffix of ['.md', '.txt']) {
       const filter = { prefix: 'docs/', suffix };
