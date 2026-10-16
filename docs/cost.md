@@ -51,13 +51,13 @@ Split the same 10 million chunks into 100 per-tenant indexes of 100,000, and eac
 
 | Chunks | Indexes | Questions a month | Storage | Query requests | Query processing | Answers | Monthly | One-time embed + PUT |
 |---|---|---|---|---|---|---|---|---|
-| 100,000 | 1 | 100,000 | $0.03 | $0.25 | $0.15 | $8.75 | $9.23 | $0.70 |
-| 100,000 | 1 | 1,000,000 | $0.03 | $2.50 | $1.54 | $87.50 | $91.97 | $0.70 |
-| 10,000,000 | 1 | 100,000 | $3.09 | $0.25 | $7.78 | $8.75 | $19.92 | $70.31 |
-| 10,000,000 | 1 | 1,000,000 | $3.09 | $2.50 | $77.82 | $87.50 | $171.31 | $70.31 |
-| 10,000,000 | 100 | 1,000,000 | $3.09 | $2.50 | $1.54 | $87.50 | $95.03 | $70.31 |
+| 100,000 | 1 | 100,000 | $0.03 | $0.25 | $0.15 | $8.75 | $9.23 | $0.84 |
+| 100,000 | 1 | 1,000,000 | $0.03 | $2.50 | $1.54 | $87.50 | $91.97 | $0.84 |
+| 10,000,000 | 1 | 100,000 | $3.09 | $0.25 | $7.78 | $8.75 | $19.92 | $84.41 |
+| 10,000,000 | 1 | 1,000,000 | $3.09 | $2.50 | $77.82 | $87.50 | $171.31 | $84.41 |
+| 10,000,000 | 100 | 1,000,000 | $3.09 | $2.50 | $1.54 | $87.50 | $95.03 | $84.41 |
 
-Assumptions: 300 tokens per chunk for embedding, 20 tokens per question, 1,700 prompt tokens and 200 answer tokens per answer, top 5 results. "Monthly" adds the question embeddings and returned data. Run `npm run cost -- --vectors 2000000 --queries 300000 --indexes 20` for your own numbers.
+Assumptions: 10 chunks per document, 300 tokens per chunk for embedding, 20 tokens per question, 1,700 prompt tokens and 200 answer tokens per answer, top 5 results. "Monthly" adds the question embeddings and returned data. Run `npm run cost -- --vectors 2000000 --queries 300000 --indexes 20` for your own numbers.
 
 Not in the table: AWS Lambda ($0.20 per million arm64 requests and $0.0000133334 per GB-second, with 1 million requests and 400,000 GB-seconds free each month), Amazon S3 storage for the documents, Amazon CloudWatch Logs, and the one alarm.
 
@@ -73,7 +73,7 @@ S3 Vectors has no compute floor at all. You pay for storage and for each request
 
 ## Ways to spend less
 
-- Batch writes. Each `PutVectors` call bills at least 128 KB. One 5 KB vector per call costs about 25 times what it costs in a batch of 500.
+- Batch writes. Each `PutVectors` call bills at least 128 KB. One 5 KB vector per call costs about 25 times what it costs in a batch of 500. Ingest writes each document in one call, so a document of 23 chunks or fewer (under 128 KB) still bills 128 KB. At 10 chunks per document, the one-time PUT charge is $0.24 per 100,000 chunks instead of $0.10 in full batches.
 - Keep filterable metadata small, and put anything you only read back in a non-filterable key.
 - Split indexes by tenant once one index passes about 100,000 vectors and queries are frequent.
 - Use Titan V2 batch inference ($0.00001 per 1,000 tokens) for large one-time loads.

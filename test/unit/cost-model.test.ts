@@ -92,6 +92,21 @@ test('every PUT call bills at least 128 KB, so batching matters', () => {
   expect(single / batched).toBeCloseTo((128 * KB) / size, 1);
 });
 
+test('one PUT call per document: short documents pay the 128 KB minimum each', () => {
+  const size = vectorBytes({ dimensions: 1024, keyBytes: 40, filterableBytes: 100, nonFilterableBytes: 1300 });
+  // 10 chunks of 5,536 bytes is 55,360 bytes, under 128 KB, so each document bills 128 KB.
+  expect(putCost(100_000, size, 10)).toBeCloseTo(((10_000 * 128 * KB) / 1024 ** 3) * 0.2, 10);
+  // 600 chunks: one call of 500 and one of 100 (553,600 bytes, over the minimum).
+  expect(putCost(600, size, 600)).toBeCloseTo(((600 * size) / 1024 ** 3) * 0.2, 10);
+  expect(() => putCost(1, size, 0)).toThrow('chunksPerDocument');
+});
+
+test('this repo: one-time embed + write for 100K chunks is $0.84 ($0.60 embed, $0.24 PUT)', () => {
+  const b = estimate({ ...THIS_REPO, vectors: 100_000, queriesPerMonth: 100_000 });
+  expect(b.putOnce).toBeCloseTo(0.244, 3);
+  expect(b.embedOnce + b.putOnce).toBeCloseTo(0.84, 2);
+});
+
 test('alternatives: OpenSearch Serverless classic and Aurora floors', () => {
   expect(alternativesFloor()).toEqual({ opensearchClassic: expect.closeTo(350.4, 6), opensearchClassicDevTest: expect.closeTo(175.2, 6), aurora05Acu: expect.closeTo(43.8, 6) });
 });
