@@ -25,7 +25,7 @@ Each function has its own role with no AWS managed policies:
 
 ## The query endpoint
 
-The query function URL uses `AWS_IAM` auth, so every request must be SigV4-signed by a principal with `lambda:InvokeFunctionUrl`. The function accepts questions up to 2,000 characters and a `topK` up to 20. Errors return `internal error` without the underlying message, so ARNs and account IDs don't leak.
+The query function URL uses `AWS_IAM` auth, so every request must be SigV4-signed by a principal with both `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction`. Function URLs created since October 2025 need both. The function accepts questions up to 2,000 characters and a `topK` up to 20. Errors return `internal error` without the underlying message, so ARNs and account IDs don't leak.
 
 ## Prompt injection
 
