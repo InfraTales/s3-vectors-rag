@@ -31,7 +31,7 @@ These are us-east-1 prices from the AWS Price List API, checked on 2026-10-16. `
 
 | Chunks | Questions a month | S3 Vectors (storage + queries) | Answers (Nova Micro) | Monthly total | One-time embed + write |
 |---|---|---|---|---|---|
-| 100,000 | 100,000 | $0.43 | $8.75 | $9.23 | $0.84 |
+| 100,000 | 100,000 | $0.44 | $8.75 | $9.23 | $0.84 |
 | 100,000 | 1,000,000 | $4.07 | $87.50 | $91.97 | $0.84 |
 | 10,000,000 in one index | 1,000,000 | $83.41 | $87.50 | $171.31 | $84.41 |
 | 10,000,000 in 100 indexes | 1,000,000 | $7.13 | $87.50 | $95.03 | $84.41 |
